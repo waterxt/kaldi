@@ -49,6 +49,8 @@ Development pattern for contributors
    You can use the [Google's cpplint.py](https://raw.githubusercontent.com/google/styleguide/gh-pages/cpplint/cpplint.py)
    to verify that your code is free of basic mistakes.
 
+
+
 Platform specific notes
 -----------------------
 
