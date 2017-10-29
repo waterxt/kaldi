@@ -164,6 +164,20 @@ class Nnet {
     return opts_;
   }
 
+  //multi-gpu
+  int32 GetDim();
+
+  void InitData();
+
+  void GetWeights();
+
+  void SetWeights();
+
+  BaseFloat* Data(){
+    InitData();
+    return data_;
+  }
+
  private:
   /// Vector which contains all the components composing the neural network,
   /// the components are for example: AffineTransform, Sigmoid, Softmax
@@ -176,6 +190,10 @@ class Nnet {
 
   /// Option class with hyper-parameters passed to UpdatableComponent(s)
   NnetTrainOptions opts_;
+
+  BaseFloat* data_ ;
+  BaseFloat* free_data_ ;
+
 };
 
 }  // namespace nnet1

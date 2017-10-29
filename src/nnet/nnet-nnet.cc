@@ -29,6 +29,7 @@ namespace kaldi {
 namespace nnet1 {
 
 Nnet::Nnet() {
+  InitData();
 }
 
 Nnet::~Nnet() {
@@ -514,7 +515,6 @@ void Nnet::SetTrainOptions(const NnetTrainOptions& opts) {
     }
   }
 }
-
 
 }  // namespace nnet1
 }  // namespace kaldi

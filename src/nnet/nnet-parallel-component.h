@@ -352,7 +352,8 @@ class ParallelComponent : public MultistreamComponent {
   }
 
  private:
-  std::vector<Nnet> nnet_;
+ std::vector<Nnet> nnet_;
+
 };
 
 }  // namespace nnet1
