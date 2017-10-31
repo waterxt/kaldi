@@ -503,6 +503,12 @@ void Nnet::Destroy() {
   components_.resize(0);
   propagate_buf_.resize(0);
   backpropagate_buf_.resize(0);
+  if(free_data_ != NULL){
+    free(free_data_);
+    free_data_ = NULL;
+    data_ = NULL;
+  }
+
 }
 
 

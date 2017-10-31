@@ -48,6 +48,7 @@ namespace kaldi {
 namespace nnet1 {
 
 class BlstmProjected : public MultistreamComponent {
+ friend class Nnet;
  public:
   BlstmProjected(int32 input_dim, int32 output_dim):
     MultistreamComponent(input_dim, output_dim),

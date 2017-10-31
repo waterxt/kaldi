@@ -41,6 +41,7 @@ namespace nnet1 {
  * Can be used in 'per-sentence' training and multi-stream training.
  */
 class RecurrentComponent : public MultistreamComponent {
+ friend class Nnet;
  public:
   RecurrentComponent(int32 input_dim, int32 output_dim):
     MultistreamComponent(input_dim, output_dim)

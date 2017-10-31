@@ -21,15 +21,18 @@
 namespace kaldi{
 namespace nnet1{
 
-NnetExample::NnetExample(Matrix<BaseFloat> &features, Posterior &labels){
+NnetExample::NnetExample(const CuMatrixBase<BaseFloat> *features, const Posterior *labels, const Vector<BaseFloat> *weight){
 
-	mat.Swap(features) ;
-	targets.Swap(labels);
+	mat= features ;
+	targets= labels;
+  frame_weights = weight ;
 }
+
+
 
 void ExamplesRepository::AcceptExamples(NnetExample &example){
 
-  KALDI_ASSERT(!examples->empty());
+  KALDI_ASSERT(!examples_.empty());
   empty_semaphore_.Wait();
   KALDI_ASSERT(examples_.empty());
   examples_.push_back(example);
@@ -53,8 +56,9 @@ bool ExamplesRepository::ProvideExamples(NnetExample &example){
     // the call by the next thread will not block.
     return false; // no examples to return-- all finished.
   } else {
-    KALDI_ASSERT(!examples_.empty() && examples->empty());
-    examples_->pop_back(example);
+    KALDI_ASSERT(!examples_.empty());
+    example = examples_.back();
+    examples_.pop_back();
     empty_semaphore_.Signal();
     return true;
   }

@@ -23,6 +23,7 @@
 #include "nnet/nnet-randomizer.h"
 #include "base/kaldi-common.h"
 #include "util/common-utils.h"
+#include "nnet/nnet-update-parallel.h"
 
 int main(int argc, char *argv[]){
 	using namespace kaldi;
@@ -111,8 +112,6 @@ int main(int argc, char *argv[]){
       nnet.SetDropoutRate(0.0);
     }
 
-    kaldi::int64 total_frames = 0;
-
     SequentialBaseFloatMatrixReader feature_reader(feature_rspecifier);
     RandomAccessPosteriorReader targets_reader(targets_rspecifier);
     RandomAccessBaseFloatVectorReader weights_reader;
@@ -132,9 +131,14 @@ int main(int argc, char *argv[]){
                        objective_function,
                        frame_weights,
                        utt_weights,
-                       rnd_opts);
+                       rnd_opts,
+                       crossvalidate);
 
-	}
+	return 0;
+	} catch(const std::exception &e) {
+    std::cerr << e.what();
+    return -1;
+  }
 
 
 

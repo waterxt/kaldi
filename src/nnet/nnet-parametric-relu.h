@@ -32,6 +32,7 @@ namespace kaldi {
 namespace nnet1 {
 
 class ParametricRelu : public UpdatableComponent {
+ friend class Nnet;
  public:
   ParametricRelu(int32 dim_in, int32 dim_out):
     UpdatableComponent(dim_in, dim_out),

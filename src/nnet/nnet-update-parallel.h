@@ -17,18 +17,22 @@
 #include "nnet/nnet-nnet.h"
 #include "base/kaldi-common.h"
 #include "nnet/nnet-loss.h"
+#include "nnet/nnet-randomizer.h"
+#include "util/common-utils.h"
+#include "nnet/nnet-trnopts.h"
 
 namespace kaldi{
 namespace nnet1{
 
 void DoBackpropParallel(const Nnet &nnet,
-						const Nnet &nnet_transf,
+						Nnet &nnet_transf,
                         SequentialBaseFloatMatrixReader &features,
                         RandomAccessPosteriorReader &targets,
                         std::string &objective_function,
                         std::string &frame_weights,
                         std::string &utt_weights,
-                        NnetDataRandomizerOptions &rnd_opts);
+                        NnetDataRandomizerOptions &rnd_opts,
+                        bool crossvalidate);
 
 }
 }

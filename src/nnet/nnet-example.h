@@ -21,6 +21,7 @@
 #include "util/table-types.h"
 #include "lat/kaldi-lattice.h"
 #include "util/kaldi-semaphore.h"
+#include "nnet/nnet-loss.h"
 
 
 namespace kaldi{
@@ -28,13 +29,14 @@ namespace nnet1{
 
 struct NnetExample {
 
-	const Matrix<BaseFloat> mat ;
-	const Posterior targets ;
-  const Vector<BaseFloat>frm_weights;
+	 const CuMatrixBase<BaseFloat> *mat ;
+	 const Posterior *targets ;
+   const Vector<BaseFloat> *frame_weights;
 
 	NnetExample() { }
 
-	NnetExample(Matrix<BaseFloat> &features, Posterior &labels);
+	NnetExample(const CuMatrixBase<BaseFloat> *features, const Posterior *labels, const Vector<BaseFloat> *weight);
+
 };
 
 

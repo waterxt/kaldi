@@ -165,7 +165,7 @@ class Nnet {
   }
 
   //multi-gpu
-  int32 GetDim();
+  int32 GetDim()const;
 
   void InitData();
 

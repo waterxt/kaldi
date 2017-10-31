@@ -20,7 +20,12 @@
 #include <nccl.h>
 #include "nnet/nnet-update-parallel.h"
 #include "util/kaldi-thread.h"
-
+#include "nnet/nnet-example.h"
+#include "base/timer.h"
+#include "base/kaldi-common.h"
+#include "util/common-utils.h"
+#include "base/timer.h"
+#include "cudamatrix/cu-device.h"
 
 namespace kaldi{
 namespace nnet1{
@@ -31,74 +36,81 @@ class DoBackpropParallelClass: public MultiThreadable {
   // that we pass to the RunMultiThreaded function.
   DoBackpropParallelClass(const Nnet &nnet,
                           ExamplesRepository *repository,
+                          std::string objective_function,
                           double *tot_weight_ptr,
-                          double *log_prob_ptr):
+                          double *log_prob_ptr,
+                          bool crossvalidate):
       nnet_(nnet), repository_(repository),
+      objective_function_(objective_function),
       tot_weight_ptr_(tot_weight_ptr),
       log_prob_ptr_(log_prob_ptr),
       tot_weight_(0.0),
-      log_prob_(0.0) { }
+      log_prob_(0.0),
+      crossvalidate_(crossvalidate) { }
 
   // This does the main function of the class.
   void operator () () {
 
   	int nDev = 0;
   	kaldi::int64 total_frames = 0;
-  	CUDACHECK(cudaGetDeviceCount(&nDev));
+  	cudaGetDeviceCount(&nDev);
   	cudaStream_t* s = (cudaStream_t*)malloc(sizeof(cudaStream_t)*nDev);
   	ncclComm_t* comms = (ncclComm_t*)malloc(sizeof(ncclComm_t)*nDev);
-  	NCCLCHECK(ncclCommInitAll(comms, nDev, dList.data()));
+  	int devs[4] = { 0, 1, 2, 3 };
+  	NCCLCHECK(ncclCommInitAll(comms, nDev, devs));
   	NCCLCHECK(ncclCommCount(comms[0], &nDev));
-  	int32 nnet_bytes = nnet.GetDim()*sizeof(BaseFloat);
-  	Nnet* nnets = (Nnet*)malloc(sizeof(Nnet)*nDev);
+  	int32 nnet_bytes = nnet_.GetDim()*sizeof(BaseFloat);
+  	Nnet* nnet = (Nnet*)malloc(sizeof(Nnet)*nDev);
   	Nnet nnet_reduce ;
   	CuMatrix<BaseFloat>* nnet_in = (CuMatrix<BaseFloat>*)malloc(sizeof(CuMatrix<BaseFloat>)*nDev);
   	CuMatrix<BaseFloat>* nnet_out = (CuMatrix<BaseFloat>*)malloc(sizeof(CuMatrix<BaseFloat>)*nDev);
   	CuMatrix<BaseFloat>* obj_diff = (CuMatrix<BaseFloat>*)malloc(sizeof(CuMatrix<BaseFloat>)*nDev);
+  	Vector<BaseFloat>* frame_weights = (Vector<BaseFloat>*)malloc(sizeof(CuMatrix<BaseFloat>)*nDev);
   	Posterior* nnet_tgt = (Posterior*)malloc(sizeof(Posterior)*nDev);
-  	NnetExample* example = (NnetExample*)malloce(sizeof(NnetExample)*nDev);
+  	NnetExample* example = (NnetExample*)malloc(sizeof(NnetExample)*nDev);
     Xent xent;
     Mse mse;
+    MultiTaskLoss multitask;
   	for (int i = 0; i < nDev; ++i) {
 
-    	CUDACHECK(cudaSetDevice(i));
-    	CUDACHECK(cudaStreamCreate(s+i));
+    	cudaSetDevice(i);
+    	cudaStreamCreate(s+i);
     	nnet[i] = nnet_;
     }
+
     nnet_reduce = nnet_ ;
-    
     bool done = false;
 
     while (!done) {
     	for (int i = 0; i < nDev; ++i) {
 
-    		CUDACHECK(cudaSetDevice(i));
+    		cudaSetDevice(i);
     		if(repository_->ProvideExamples(example[i])){
     			done = true ;
     			continue;
     		}
-    		nnet_in[i] = example[i].feature();
-        	nnet_tgt[i] = example[i].target();
-        	frm_weights[i] = example[i].frame_weight();
+    		nnet_in[i] = *(example[i].mat);
+        	nnet_tgt[i] = *(example[i].targets);
+        	frame_weights[i] = *(example[i].frame_weights);
 
-    		nnets[i].Propagate(nnet_in[i], nnet_out+i);
+    		nnet[i].Propagate(nnet_in[i], nnet_out+i);
         	// evaluate objective function we've chosen,
-    		if (objective_function == "xent") {
+    		if (objective_function_ == "xent") {
           	// gradients re-scaled by weights in Eval,
-    			xent.Eval(frm_weights[i], nnet_out[i], nnet_tgt[i], obj_diff+i);
-    		} else if (objective_function == "mse") {
+    			xent.Eval(frame_weights[i], nnet_out[i], nnet_tgt[i], obj_diff+i);
+    		} else if (objective_function_ == "mse") {
           	// gradients re-scaled by weights in Eval,
-    			mse.Eval(frm_weights[i], nnet_out[i], nnet_tgt[i], obj_diff+i);
-    		} else if (0 == objective_function.compare(0, 9, "multitask")) {
+    			mse.Eval(frame_weights[i], nnet_out[i], nnet_tgt[i], obj_diff+i);
+    		} else if (0 == objective_function_.compare(0, 9, "multitask")) {
           	// gradients re-scaled by weights in Eval,
-    			multitask.Eval(frm_weights[i], nnet_out[i], nnet_tgt[i], obj_diff+i);
+    			multitask.Eval(frame_weights[i], nnet_out[i], nnet_tgt[i], obj_diff+i);
     		} else {
-    			KALDI_ERR << "Unknown objective function code : " << objective_function;
+    			KALDI_ERR << "Unknown objective function code : " << objective_function_;
     		}
 
-    		if (!crossvalidate) {
+    		if (!crossvalidate_) {
           	// back-propagate, and do the update,
-    			nnets[i].Backpropagate(obj_diff[i], NULL);
+    			nnet[i].Backpropagate(obj_diff[i], NULL);
     		}
 
     		if( i == 0){
@@ -112,7 +124,7 @@ class DoBackpropParallelClass: public MultiThreadable {
     				ncclChar, ncclSum, 0, comms[i], s[i]));
     		}
 
-    		CUDACHECK(cudaStreamSynchronize(s[i]));
+    		cudaStreamSynchronize(s[i]);
   			
     		if(i == 0)
     			nnet[0] = nnet_reduce ;
@@ -125,7 +137,7 @@ class DoBackpropParallelClass: public MultiThreadable {
         		KALDI_VLOG(1) << "### After " << total_frames << " frames,";
         		KALDI_VLOG(1) << nnet[i].InfoPropagate();
 
-        		if (!crossvalidate) {
+        		if (!crossvalidate_) {
           			KALDI_VLOG(1) << nnet[i].InfoBackPropagate();
           			KALDI_VLOG(1) << nnet[i].InfoGradient();
         		}
@@ -134,16 +146,16 @@ class DoBackpropParallelClass: public MultiThreadable {
 
         if (GetVerboseLevel() >= 2) {
           static int32 counter = 0;
-          CUDACHECK(cudaSetDevice(0));
+          cudaSetDevice(0);
           counter += nDev * nnet_in[0].NumRows();
           // print every 25k frames,
           if (counter >= 25000) {
             KALDI_VLOG(2) << "### After " << total_frames << " frames,";
             for(int i = 0; i < nDev; i++){
 
-    			CUDACHECK(cudaSetDevice(i));
+    			cudaSetDevice(i);
             	KALDI_VLOG(2) << nnet[i].InfoPropagate();
-            	if (!crossvalidate) {
+            	if (!crossvalidate_) {
               		KALDI_VLOG(2) << nnet[i].InfoBackPropagate();
               		KALDI_VLOG(2) << nnet[i].InfoGradient();
             	}
@@ -152,14 +164,9 @@ class DoBackpropParallelClass: public MultiThreadable {
           }
         }
 
-        CUDACHECK(cudaSetDevice(0));
+        cudaSetDevice(0);
         total_frames += nDev * nnet_in[0].NumRows();
     }
-
-  }
-
-  ~DoBackpropParallelClass() {
-
   	if(nnet_in != NULL){
   		free(nnet_in);
   		nnet_in = NULL;
@@ -183,33 +190,46 @@ class DoBackpropParallelClass: public MultiThreadable {
 
   }
 
+  ~DoBackpropParallelClass() {
+
+  }
+
  private:
   const Nnet &nnet_;
   ExamplesRepository *repository_;
+  std::string objective_function_;
   double *tot_weight_ptr_;
   double *log_prob_ptr_;
   double tot_weight_;
   double log_prob_; // log-like times num frames.
+  bool crossvalidate_;
 };
 
 void DoBackpropParallel(const Nnet &nnet,
-						  const Nnet &nnet_transf,
+						  Nnet &nnet_transf,
                           SequentialBaseFloatMatrixReader &feature_reader,
                           RandomAccessPosteriorReader &targets_reader,
                           std::string &objective_function,
                           std::string &frame_weights,
                           std::string &utt_weights,
-                          NnetDataRandomizerOptions &rnd_opts) {
+                          NnetDataRandomizerOptions &rnd_opts,
+                          bool crossvalidate) {
 
 
   	ExamplesRepository repository; // handles parallel programming issues regarding
   	// the "examples" of data.
   	double tot_log_prob = 0.0;
-  	double *tot_weight = 0.0;
+  	double tot_weight = 0.0;
   	int32 num_threads = 1;
   	kaldi::int64 total_frames = 0;
+  	int32 num_other_error = 0;
+  	int32 num_no_tgt_mat = 0;
+  	int32 num_done = 0 ;
+  	int32 length_tolerance = 5 ;
+  	CuMatrix<BaseFloat> feats_transf;
+  	Timer time;
 
-  	DoBackpropParallelClass c(nnet, &repository, tot_weight, &tot_log_prob);
+  	DoBackpropParallelClass c(nnet, &repository, objective_function, &tot_weight, &tot_log_prob, crossvalidate);
 
   
     // The initialization of the following class spawns the threads that
@@ -221,7 +241,7 @@ void DoBackpropParallel(const Nnet &nnet,
     MatrixRandomizer feature_randomizer(rnd_opts);
     PosteriorRandomizer targets_randomizer(rnd_opts);
     VectorRandomizer weights_randomizer(rnd_opts);
-
+    RandomAccessBaseFloatVectorReader weights_reader;
     if (frame_weights != "") {
       weights_reader.Open(frame_weights);
     }
@@ -303,7 +323,7 @@ void DoBackpropParallel(const Nnet &nnet,
           		}
           	}
         	// apply feature transform (if empty, input is copied),
-          	nnet_transf.Feedforward(Matrix<BaseFloat>(mat), &feats_transf);
+          	nnet_transf.Feedforward(CuMatrix<BaseFloat>(mat), &feats_transf);
 
         	// remove frames with '0' weight from training,
           	{
@@ -322,7 +342,7 @@ void DoBackpropParallel(const Nnet &nnet,
           			if (keep_frames.size() == 0) continue;
 
             		// filter feature-frames,
-          			Matrix<BaseFloat> tmp_feats(keep_frames.size(), feats_transf.NumCols());
+          			CuMatrix<BaseFloat> tmp_feats(keep_frames.size(), feats_transf.NumCols());
           			tmp_feats.CopyRows(feats_transf, CuArray<MatrixIndexT>(keep_frames));
           			tmp_feats.Swap(&feats_transf);
 
@@ -360,7 +380,7 @@ void DoBackpropParallel(const Nnet &nnet,
         }
 
     	// randomize,
-    	if (!crossvalidate && randomize) {
+    	if (!crossvalidate) {
         	const std::vector<int32>& mask =
           		randomizer_mask.Generate(feature_randomizer.NumFrames());
         	feature_randomizer.Randomize(mask);
@@ -371,17 +391,17 @@ void DoBackpropParallel(const Nnet &nnet,
     	for ( ; !feature_randomizer.Done(); feature_randomizer.Next(),
                                         	targets_randomizer.Next(),
                                         	weights_randomizer.Next()) {
-    		NnetExample example(feature_randomizer.Value(), targets_randomizer.Value(), weights_randomizer.Value());
+    		NnetExample example(&feature_randomizer.Value(), &targets_randomizer.Value(), &weights_randomizer.Value());
     		repository.AcceptExamples(example);
     	}
 
     }
 
   
-  	KALDI_LOG << "Did backprop on " << *tot_weight << " examples, average log-prob "
-              << "per frame is " << (tot_log_prob / *tot_weight);
+  	KALDI_LOG << "Did backprop on " << tot_weight << " examples, average log-prob "
+              << "per frame is " << (tot_log_prob / tot_weight);
     KALDI_LOG << "[this line is to be parsed by a script:] log-prob-per-frame="
-              << (tot_log_prob / *tot_weight);
+              << (tot_log_prob / tot_weight);
     //return tot_log_prob;
 }
 

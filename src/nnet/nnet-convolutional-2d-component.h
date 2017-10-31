@@ -70,6 +70,7 @@ namespace nnet1 {
  *
  */
 class Convolutional2DComponent : public UpdatableComponent {
+ friend class Nnet;
  public:
   Convolutional2DComponent(int32 dim_in, int32 dim_out):
     UpdatableComponent(dim_in, dim_out),

@@ -31,7 +31,9 @@ namespace kaldi {
 namespace nnet1 {
 
 class AffineTransform : public UpdatableComponent {
+
  public:
+  friend class Nnet;
   AffineTransform(int32 dim_in, int32 dim_out):
     UpdatableComponent(dim_in, dim_out),
     linearity_(dim_out, dim_in), bias_(dim_out),

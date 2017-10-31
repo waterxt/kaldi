@@ -46,6 +46,7 @@ namespace kaldi {
 namespace nnet1 {
 
 class LstmProjected : public MultistreamComponent {
+ friend class Nnet;
  public:
   LstmProjected(int32 input_dim, int32 output_dim):
     MultistreamComponent(input_dim, output_dim),
